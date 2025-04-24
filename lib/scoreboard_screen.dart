@@ -1,80 +1,116 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'vote_detail_screen.dart';
 
-class ScoreboardScreen extends StatelessWidget {
-  final FirebaseFirestore db = FirebaseFirestore.instance;
+class ScoreboardScreen extends StatefulWidget {
+  @override
+  _ScoreboardScreenState createState() => _ScoreboardScreenState();
+}
 
-  Future<void> resetScores() async {
-    WriteBatch batch = db.batch();
-
-    QuerySnapshot scoreboardSnapshot = await db.collection('scoreboard').get();
-    for (var contestantDoc in scoreboardSnapshot.docs) {
-      batch.update(contestantDoc.reference, {
-        'total_score': 0,
-        'judges_count': 0,
-        'judges': []
-      });
-    }
-
-    await batch.commit();
-    print("All scores reset successfully!");
-  }
-
-  Stream<QuerySnapshot> getScoreboard() {
-    return db.collection('scoreboard')
-        .orderBy('total_score', descending: true)
-        .snapshots();
-  }
-
+class _ScoreboardScreenState extends State<ScoreboardScreen> {
+  String? selectedEvent;
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black, // Dark background
-      appBar: AppBar(title: Text('Scoreboard', style: TextStyle(color: Colors.white)), backgroundColor: Colors.orange),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: getScoreboard(),
+      appBar: AppBar(title: Text("Event Scoreboard")),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            // Event Dropdown.
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('events').snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return Center(child: CircularProgressIndicator(color: Colors.orange));
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return Text("No events available", style: TextStyle(color: Colors.red));
                 }
-
-                var scores = snapshot.data!.docs;
-
-                return ListView.builder(
-                  itemCount: scores.length,
-                  itemBuilder: (context, index) {
-                    var data = scores[index].data() as Map<String, dynamic>;
-                    return Card(
-                      color: Colors.orange, // Orange card for visual appeal
-                      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      elevation: 4,
-                      child: ListTile(
-                        title: Text("Contestant: ${scores[index].id}", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                        subtitle: Text("Score: ${data['total_score']} (Judged by ${data['judges_count']} judges)\nJudges: ${data['judges'].join(', ')}", style: TextStyle(color: Colors.white)),
-                      ),
+                return DropdownButtonFormField<String>(
+                  decoration: InputDecoration(labelText: 'Select Event'),
+                  value: selectedEvent,
+                  items: snapshot.data!.docs.map((doc) {
+                    String eventName = "Unknown Event";
+                    var data = doc.data();
+                    if (data is Map<String, dynamic> && data.containsKey('name')) {
+                      eventName = data['name'].toString();
+                    }
+                    return DropdownMenuItem<String>(
+                      value: doc.id,
+                      child: Text(eventName),
                     );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedEvent = value;
+                    });
                   },
                 );
               },
             ),
-          ),
-          SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: ElevatedButton(
-              onPressed: () async {
-                await resetScores();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("All scores reset successfully!", style: TextStyle(color: Colors.white))));
-              },
-              child: Text('Reset Scores', style: TextStyle(fontSize: 18, color: Colors.white)),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+            SizedBox(height: 20),
+            
+            // Scoreboard List.
+            Expanded(
+              child: selectedEvent == null
+                  ? Center(child: Text("Please select an event"))
+                  : StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('events')
+                          .doc(selectedEvent)
+                          .collection('scoreboard')
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                          return Center(
+                              child: Text("No scoreboard data available", style: TextStyle(color: Colors.red)));
+                        }
+                        return ListView(
+                          children: snapshot.data!.docs.map((contestantDoc) {
+                            String contestant = contestantDoc.id;
+                            // Get votes for each contestant.
+                            return FutureBuilder<QuerySnapshot>(
+                              future: contestantDoc.reference.collection('votes').get(),
+                              builder: (context, voteSnapshot) {
+                                if (!voteSnapshot.hasData) {
+                                  return ListTile(
+                                      title: Text(contestant),
+                                      subtitle: Text("Loading votes..."));
+                                }
+                                var votesDocs = voteSnapshot.data!.docs;
+                                if (votesDocs.isEmpty) {
+                                  return ListTile(
+                                      title: Text(contestant),
+                                      subtitle: Text("No votes submitted yet"));
+                                }
+                                double totalSum = 0;
+                                for (var voteDoc in votesDocs) {
+                                  var voteData = voteDoc.data() as Map<String, dynamic>;
+                                  double voteTotal = (voteData['total'] is num)
+                                      ? (voteData['total'] as num).toDouble()
+                                      : 0.0;
+                                  totalSum += voteTotal;
+                                }
+                                double averageScore = totalSum / votesDocs.length;
+                                return ListTile(
+                                  title: Text("$contestant | Total Score: ${averageScore.toStringAsFixed(1)}"),
+                                  subtitle: Text("Judges: ${votesDocs.length}"),
+                                  onTap: () {
+                                    Navigator.push(context,
+                                        MaterialPageRoute(builder: (context) => VoteDetailScreen(
+                                          eventId: selectedEvent!,
+                                          contestant: contestant,
+                                        )));
+                                  },
+                                );
+                              },
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
             ),
-          ),
-          SizedBox(height: 20),
-        ],
+          ],
+        ),
       ),
     );
   }

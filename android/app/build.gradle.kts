@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.example.flutter_judge_app"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 34
     ndkVersion = "27.0.12077973" // Set the required NDK version
 
     compileOptions {
@@ -26,7 +26,8 @@ android {
         applicationId = "com.example.flutter_judge_app"
         // Explicitly set minSdk to 23 to resolve the Firebase plugin issue
         minSdk = 23
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 34
+        
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
