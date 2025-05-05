@@ -11,11 +11,15 @@ class _JudgeScreenState extends State<JudgeScreen> {
   String? selectedEventName; // Holds the event name from Firestore.
   String? selectedContestant;
   TextEditingController judgeNameController = TextEditingController();
-  Map<String, double> criteriaScores = {}; // Holds scores for each criterion.
-  List<String> criteria = []; // Fetched criteria from Firestore.
+  
+  // Criteria will now be a list of maps (each with keys "name" and "weight")
+  List<Map<String, dynamic>> criteria = [];
+  
+  // Holds the current scores for each criterion (keyed by criterion name)
+  Map<String, double> criteriaScores = {};
   bool criteriaLoading = false;
 
-  // Fetch the event's criteria and name
+  // Fetch the event's criteria (a list of maps) and event name.
   Future<void> fetchCriteria(String eventId) async {
     setState(() {
       criteriaLoading = true;
@@ -29,26 +33,22 @@ class _JudgeScreenState extends State<JudgeScreen> {
           .get();
 
       var criteriaData = eventDoc.get('criteria');
-      List<String> fetchedCriteria = [];
+      List<Map<String, dynamic>> fetchedCriteria = [];
       if (criteriaData is List<dynamic>) {
-        fetchedCriteria =
-            List<String>.from(criteriaData.map((e) => e.toString()));
-      } else if (criteriaData is Map) {
-        List<MapEntry<dynamic, dynamic>> entries =
-            (criteriaData as Map).entries.toList();
-        entries.sort((a, b) {
-          int aKey = int.tryParse(a.key.toString()) ?? 999;
-          int bKey = int.tryParse(b.key.toString()) ?? 999;
-          return aKey.compareTo(bKey);
-        });
-        fetchedCriteria =
-            entries.map((entry) => entry.value.toString()).toList();
+        for (var item in criteriaData) {
+          if (item is Map) {
+            String critName = item["name"]?.toString() ?? "";
+            double critWeight = double.tryParse(item["weight"]?.toString() ?? "0") ?? 0;
+            if (critName.isNotEmpty) {
+              fetchedCriteria.add({"name": critName, "weight": critWeight});
+            }
+          }
+        }
       }
       
       String eventName = "Unknown Event";
       var eventData = eventDoc.data();
-      if (eventData is Map<String, dynamic> &&
-          eventData.containsKey('name')) {
+      if (eventData is Map<String, dynamic> && eventData.containsKey('name')) {
         eventName = eventData['name'].toString();
       }
       
@@ -65,37 +65,55 @@ class _JudgeScreenState extends State<JudgeScreen> {
     }
   }
 
-  // Submit vote: ensures the scoreboard document exists,
-  // then writes the vote document to the "votes" subcollection.
+  // Submit vote: checks if the judge has already voted for the chosen candidate.
   void submitVote() async {
     String judgeName = judgeNameController.text.trim();
     if (selectedEvent != null &&
         selectedContestant != null &&
         judgeName.isNotEmpty) {
-      // Reference to the contestant document in the scoreboard.
+      
+      // Reference to the candidate document in the scoreboard.
       var scoreboardRef = FirebaseFirestore.instance
           .collection('events')
           .doc(selectedEvent)
           .collection('scoreboard')
           .doc(selectedContestant);
-
-      // Ensure the scoreboard document exists.
+      
+      // Check if this judge already submitted a vote for this candidate.
+      QuerySnapshot existingVote = await scoreboardRef
+          .collection('votes')
+          .where('judge', isEqualTo: judgeName)
+          .get();
+      if (existingVote.docs.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("You have already submitted a score for $selectedContestant.")),
+        );
+        return;
+      }
+      
+      // Ensure the candidate document exists.
       await scoreboardRef.set({
         'contestant': selectedContestant,
       }, SetOptions(merge: true));
-
-      // Calculate the total score.
-      double totalScore =
-          criteriaScores.values.fold(0, (sum, element) => sum + element);
-
-      // Add a new vote document to the "votes" subcollection.
+      
+      // Calculate weighted total score using each criterion's weight.
+      double weightedTotal = 0.0;
+      for (var crit in criteria) {
+        String critName = crit["name"];
+        double weight = crit["weight"];
+        double score = criteriaScores[critName] ?? 0;
+        // Multiply the score by weight divided by 100.
+        weightedTotal += score * (weight / 100);
+      }
+      
+      // Store the vote.
       await scoreboardRef.collection('votes').add({
         'judge': judgeName,
-        'criteria_scores': criteriaScores,
-        'total': totalScore,
+        'criteria_scores': criteriaScores, // stores the raw scores per criterion
+        'total': weightedTotal,
         'timestamp': FieldValue.serverTimestamp(),
       });
-
+      
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Scores submitted by $judgeName!")));
       judgeNameController.clear();
@@ -113,21 +131,18 @@ class _JudgeScreenState extends State<JudgeScreen> {
         padding: EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // Judge Name Input
+            // Judge Name Input.
             TextField(
               controller: judgeNameController,
               decoration: InputDecoration(labelText: "Enter your name"),
             ),
             SizedBox(height: 20),
-
-            // Event Dropdown
+            // Event Dropdown.
             StreamBuilder<QuerySnapshot>(
-              stream:
-                  FirebaseFirestore.instance.collection('events').snapshots(),
+              stream: FirebaseFirestore.instance.collection('events').snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Text("No events available",
-                      style: TextStyle(color: Colors.red));
+                  return Text("No events available", style: TextStyle(color: Colors.red));
                 }
                 return DropdownButtonFormField<String>(
                   decoration: InputDecoration(labelText: 'Select Event'),
@@ -139,7 +154,7 @@ class _JudgeScreenState extends State<JudgeScreen> {
                       eventName = data['name'].toString();
                     }
                     return DropdownMenuItem<String>(
-                      value: doc.id, // using the document ID as the key
+                      value: doc.id,
                       child: Text(eventName),
                     );
                   }).toList(),
@@ -159,8 +174,7 @@ class _JudgeScreenState extends State<JudgeScreen> {
               },
             ),
             SizedBox(height: 20),
-
-            // Contestant Dropdown: Merging default list with Firestore data.
+            // Contestant Dropdown: merging the default list with Firestore data.
             if (selectedEvent != null)
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
@@ -169,25 +183,20 @@ class _JudgeScreenState extends State<JudgeScreen> {
                     .collection('scoreboard')
                     .snapshots(),
                 builder: (context, snapshot) {
-                  // Default contestants always to show.
                   final List<String> defaultContestants = ["CECE", "CBA", "CTELAN"];
-                  // Get contestants from Firestore.
                   List<String> firestoreContestants = [];
                   if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
                     firestoreContestants = snapshot.data!.docs
                         .map((doc) => doc.id.toString())
                         .toList();
                   }
-                  // Merge the two lists.
                   List<String> mergedContestants = List.from(defaultContestants);
                   for (var c in firestoreContestants) {
                     if (!mergedContestants.contains(c)) {
                       mergedContestants.add(c);
                     }
                   }
-                  // (Optional: sort alphabetically)
                   mergedContestants.sort();
-
                   return DropdownButtonFormField<String>(
                     decoration: InputDecoration(labelText: 'Select Contestant'),
                     value: selectedContestant,
@@ -206,30 +215,31 @@ class _JudgeScreenState extends State<JudgeScreen> {
                 },
               ),
             SizedBox(height: 20),
-
-            // Display Criteria with Sliders
+            // Display Criteria sliders.
             criteriaLoading
                 ? Text("Loading criteria...", style: TextStyle(color: Colors.blue))
                 : criteria.isNotEmpty
                     ? Column(
                         children: criteria.map((criterion) {
+                          String critName = criterion["name"];
+                          double weight = criterion["weight"];
+                          // Clean display: only show criterion name and percentage without extra labels.
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(criterion,
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold)),
+                              Text(
+                                "$critName - ${weight.toInt()}%",
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
                               Slider(
-                                value: criteriaScores[criterion] ?? 0,
+                                value: criteriaScores[critName] ?? 0,
                                 min: 0,
                                 max: 10,
                                 divisions: 10,
-                                label:
-                                    (criteriaScores[criterion] ?? 0).toString(),
+                                label: (criteriaScores[critName] ?? 0).toString(),
                                 onChanged: (newScore) {
                                   setState(() {
-                                    criteriaScores[criterion] = newScore;
+                                    criteriaScores[critName] = newScore;
                                   });
                                 },
                               ),
@@ -238,11 +248,9 @@ class _JudgeScreenState extends State<JudgeScreen> {
                           );
                         }).toList(),
                       )
-                    : Text("No criteria found",
-                        style: TextStyle(color: Colors.red)),
+                    : Text("No criteria found", style: TextStyle(color: Colors.red)),
             SizedBox(height: 20),
-
-            // Submit Scores Button
+            // Submit Scores Button.
             ElevatedButton(
               onPressed: submitVote,
               child: Text("Submit Scores"),

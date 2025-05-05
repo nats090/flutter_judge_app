@@ -62,7 +62,8 @@ class _ScoreboardScreenState extends State<ScoreboardScreen> {
                       builder: (context, snapshot) {
                         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                           return Center(
-                              child: Text("No scoreboard data available", style: TextStyle(color: Colors.red)));
+                              child: Text("No scoreboard data available",
+                                  style: TextStyle(color: Colors.red)));
                         }
                         return ListView(
                           children: snapshot.data!.docs.map((contestantDoc) {
@@ -85,9 +86,10 @@ class _ScoreboardScreenState extends State<ScoreboardScreen> {
                                 double totalSum = 0;
                                 for (var voteDoc in votesDocs) {
                                   var voteData = voteDoc.data() as Map<String, dynamic>;
-                                  double voteTotal = (voteData['total'] is num)
-                                      ? (voteData['total'] as num).toDouble()
-                                      : 0.0;
+                                  double voteTotal =
+                                      (voteData['total'] is num)
+                                          ? (voteData['total'] as num).toDouble()
+                                          : 0.0;
                                   totalSum += voteTotal;
                                 }
                                 double averageScore = totalSum / votesDocs.length;
@@ -95,11 +97,14 @@ class _ScoreboardScreenState extends State<ScoreboardScreen> {
                                   title: Text("$contestant | Total Score: ${averageScore.toStringAsFixed(1)}"),
                                   subtitle: Text("Judges: ${votesDocs.length}"),
                                   onTap: () {
-                                    Navigator.push(context,
-                                        MaterialPageRoute(builder: (context) => VoteDetailScreen(
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => VoteDetailScreen(
                                           eventId: selectedEvent!,
-                                          contestant: contestant,
-                                        )));
+                                        ),
+                                      ),
+                                    );
                                   },
                                 );
                               },
