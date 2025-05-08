@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.example.flutter_judge_app"
-    compileSdk = 34
+    compileSdk = 35 // <-- Change this from 34 to 35
     ndkVersion = "27.0.12077973" // Set the required NDK version
 
     compileOptions {

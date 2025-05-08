@@ -5,19 +5,33 @@ import 'package:pdf/pdf.dart'; // For PdfColor.
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-class VoteDetailScreen extends StatelessWidget {
+class VoteDetailScreen extends StatefulWidget {
   final String eventId;
 
-  const VoteDetailScreen({required this.eventId});
+  const VoteDetailScreen({required this.eventId, Key? key}) : super(key: key);
 
-  /// Fetches candidate vote data from Firestore.
-  /// For each candidate document within the "scoreboard" subcollection,
-  /// it retrieves vote documents, calculates cumulative totals and averages,
-  /// and returns a sorted list of candidate data.
+  @override
+  _VoteDetailScreenState createState() => _VoteDetailScreenState();
+}
+
+class _VoteDetailScreenState extends State<VoteDetailScreen> {
+  late Future<Map<String, dynamic>> _combinedDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCombinedData();
+  }
+
+  void _loadCombinedData() {
+    _combinedDataFuture = fetchCombinedData();
+  }
+
+  /// Fetch candidate vote data from Firestore.
   Future<List<Map<String, dynamic>>> fetchCandidatesData() async {
     QuerySnapshot scoreboardSnapshot = await FirebaseFirestore.instance
         .collection('events')
-        .doc(eventId)
+        .doc(widget.eventId)
         .collection('scoreboard')
         .get();
 
@@ -66,12 +80,10 @@ class VoteDetailScreen extends StatelessWidget {
   }
 
   /// Fetch a mapping of criteria from the event document.
-  /// The event document is expected to store criteria as a list of maps,
-  /// each containing keys "name" and "weight".
   Future<Map<String, double>> fetchEventCriteriaMapping() async {
     DocumentSnapshot eventDoc = await FirebaseFirestore.instance
         .collection('events')
-        .doc(eventId)
+        .doc(widget.eventId)
         .get();
     Map<String, double> criteriaMap = {};
     var critData = eventDoc.get('criteria');
@@ -79,7 +91,8 @@ class VoteDetailScreen extends StatelessWidget {
       for (var item in critData) {
         if (item is Map) {
           String name = item["name"]?.toString() ?? "";
-          double weight = double.tryParse(item["weight"]?.toString() ?? "0") ?? 0;
+          double weight =
+              double.tryParse(item["weight"]?.toString() ?? "0") ?? 0;
           if (name.isNotEmpty) {
             criteriaMap[name] = weight;
           }
@@ -93,7 +106,7 @@ class VoteDetailScreen extends StatelessWidget {
   Future<String> fetchEventName() async {
     DocumentSnapshot eventDoc = await FirebaseFirestore.instance
         .collection('events')
-        .doc(eventId)
+        .doc(widget.eventId)
         .get();
     String eventName = "Unknown Event";
     if (eventDoc.exists) {
@@ -116,7 +129,6 @@ class VoteDetailScreen extends StatelessWidget {
   }
 
   /// Helper to clean up a criteria header.
-  /// This function returns only the name portion of a raw criterion.
   String cleanupCriterionHeader(dynamic rawCrit) {
     if (rawCrit is Map) {
       return rawCrit["name"]?.toString() ?? "";
@@ -124,10 +136,7 @@ class VoteDetailScreen extends StatelessWidget {
     return rawCrit.toString();
   }
 
-  /// Generates a PDF document that includes:
-  /// • A header with the Event Name.
-  /// • Detailed tables for each candidate.
-  /// • A final aggregated results table.
+  /// Generates a PDF document.
   Future<Uint8List> _generatePdf(
       List<Map<String, dynamic>> candidates,
       Map<String, double> criteriaMap,
@@ -143,7 +152,8 @@ class VoteDetailScreen extends StatelessWidget {
           content.add(
             pw.Text("Event: $eventName",
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                style: pw.TextStyle(
+                    fontSize: 18, fontWeight: pw.FontWeight.bold)),
           );
           content.add(pw.SizedBox(height: 8));
 
@@ -151,7 +161,8 @@ class VoteDetailScreen extends StatelessWidget {
           content.add(
             pw.Text("Detailed Candidate Vote Report",
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                style: pw.TextStyle(
+                    fontSize: 24, fontWeight: pw.FontWeight.bold)),
           );
           content.add(pw.SizedBox(height: 16));
 
@@ -162,28 +173,31 @@ class VoteDetailScreen extends StatelessWidget {
                 (candidate['votes'] as List).cast<Map<String, dynamic>>();
             content.add(
               pw.Text("$name Vote Details",
-                  style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                  style: pw.TextStyle(
+                      fontSize: 20, fontWeight: pw.FontWeight.bold)),
             );
             content.add(pw.SizedBox(height: 8));
-
             if (votes.isEmpty) {
               content.add(
                 pw.Text("No votes submitted",
-                    style: pw.TextStyle(color: PdfColor.fromInt(0xFFFF0000))),
+                    style: pw.TextStyle(
+                        color: PdfColor.fromInt(0xFFFF0000))),
               );
             } else {
               // Retrieve criteria keys from the first vote.
               List<dynamic> rawCriteriaKeys = [];
               if (votes.isNotEmpty &&
                   (votes.first['criteria'] as Map).isNotEmpty) {
-                rawCriteriaKeys = (votes.first['criteria'] as Map).keys.toList();
+                rawCriteriaKeys =
+                    (votes.first['criteria'] as Map).keys.toList();
               }
-              List<String> criteriaKeys =
-                  rawCriteriaKeys.map((raw) => cleanupCriterionHeader(raw)).toList();
+              List<String> criteriaKeys = rawCriteriaKeys
+                  .map((raw) => cleanupCriterionHeader(raw))
+                  .toList();
 
               // Build table data.
               List<List<String>> tableData = [];
-              // Header row: "Judge" followed by criteria names only, then "Total".
+              // Header row.
               List<String> headerRow = ["Judge"];
               headerRow.addAll(criteriaKeys);
               headerRow.add("Total");
@@ -193,10 +207,13 @@ class VoteDetailScreen extends StatelessWidget {
               for (var vote in votes) {
                 List<String> row = [];
                 row.add(vote['judge'].toString());
-                Map<String, dynamic> critValues = vote['criteria'] as Map<String, dynamic>;
+                Map<String, dynamic> critValues =
+                    vote['criteria'] as Map<String, dynamic>;
                 for (var rawKey in rawCriteriaKeys) {
                   String keyStr = cleanupCriterionHeader(rawKey);
-                  row.add(critValues.containsKey(keyStr) ? critValues[keyStr].toString() : "-");
+                  row.add(critValues.containsKey(keyStr)
+                      ? critValues[keyStr].toString()
+                      : "-");
                 }
                 row.add((vote['total'] as num).toStringAsFixed(1));
                 tableData.add(row);
@@ -206,8 +223,8 @@ class VoteDetailScreen extends StatelessWidget {
                 pw.Table.fromTextArray(
                   data: tableData,
                   headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                  headerDecoration: pw.BoxDecoration(
-                      color: PdfColor.fromInt(0xFFE0E0E0)),
+                  headerDecoration:
+                      pw.BoxDecoration(color: PdfColor.fromInt(0xFFE0E0E0)),
                   cellHeight: 30,
                   cellAlignment: pw.Alignment.centerLeft,
                 ),
@@ -220,7 +237,8 @@ class VoteDetailScreen extends StatelessWidget {
           content.add(
             pw.Text("Aggregated Scores & Rankings",
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                style: pw.TextStyle(
+                    fontSize: 24, fontWeight: pw.FontWeight.bold)),
           );
           content.add(pw.SizedBox(height: 8));
           List<List<String>> aggTable = [];
@@ -255,7 +273,8 @@ class VoteDetailScreen extends StatelessWidget {
           content.add(
             pw.Table.fromTextArray(
               data: aggTable,
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              headerStyle:
+                  pw.TextStyle(fontWeight: pw.FontWeight.bold),
               headerDecoration: pw.BoxDecoration(
                   color: PdfColor.fromInt(0xFFE0E0E0)),
               cellHeight: 30,
@@ -267,7 +286,6 @@ class VoteDetailScreen extends StatelessWidget {
         },
       ),
     );
-
     return pdf.save();
   }
 
@@ -276,9 +294,19 @@ class VoteDetailScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text("Final Scoreboard"),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: () {
+              setState(() {
+                _loadCombinedData();
+              });
+            },
+          ),
+        ],
       ),
       body: FutureBuilder<Map<String, dynamic>>(
-        future: fetchCombinedData(),
+        future: _combinedDataFuture,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return Center(child: CircularProgressIndicator());
@@ -296,11 +324,12 @@ class VoteDetailScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Display Event Name on screen
+                // Display Event Name on screen.
                 Text("Event: $eventName",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 SizedBox(height: 16),
-                // Display each candidate's vote details in a Card.
+                // Candidate Vote Details Cards.
                 ...candidates.map((candidate) {
                   final votes =
                       (candidate['votes'] as List).cast<Map<String, dynamic>>();
@@ -324,35 +353,63 @@ class VoteDetailScreen extends StatelessWidget {
                                   child: DataTable(
                                     columns: [
                                       DataColumn(
-                                          label: Text("Judge",
-                                              style: TextStyle(fontWeight: FontWeight.bold))),
+                                          label: SizedBox(
+                                              width: 120,
+                                              child: Text("Judge",
+                                                  style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold)))),
                                       ...((votes.isNotEmpty &&
-                                              (votes.first['criteria'] as Map).isNotEmpty)
+                                              (votes.first['criteria']
+                                                      as Map)
+                                                  .isNotEmpty)
                                           ? (votes.first['criteria'] as Map)
                                               .keys
                                               .map((rawKey) {
-                                              String headerText = cleanupCriterionHeader(rawKey);
+                                              String headerText =
+                                                  cleanupCriterionHeader(rawKey);
                                               return DataColumn(
-                                                  label: Text(headerText,
-                                                      style: TextStyle(fontWeight: FontWeight.bold)));
+                                                  label: SizedBox(
+                                                      width: 100,
+                                                      child: Text(headerText,
+                                                          style: TextStyle(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold))));
                                             }).toList()
                                           : []),
                                       DataColumn(
-                                          label: Text("Total",
-                                              style: TextStyle(fontWeight: FontWeight.bold))),
+                                          label: SizedBox(
+                                              width: 100,
+                                              child: Text("Total",
+                                                  style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold)))),
                                     ],
                                     rows: votes.map((vote) {
                                       Map<String, dynamic> crit =
                                           vote['criteria'] as Map<String, dynamic>;
                                       List<DataCell> cells = [];
-                                      cells.add(DataCell(Text(vote['judge'].toString())));
+                                      cells.add(DataCell(
+                                          SizedBox(
+                                              width: 120,
+                                              child: Text(
+                                                  vote['judge'].toString()))));
                                       if (crit.isNotEmpty) {
                                         crit.forEach((key, value) {
-                                          cells.add(DataCell(Text(value.toString())));
+                                          cells.add(DataCell(
+                                              SizedBox(
+                                                  width: 100,
+                                                  child: Text(
+                                                      value.toString()))));
                                         });
                                       }
-                                      cells.add(DataCell(Text(
-                                          (vote['total'] as num).toStringAsFixed(1))));
+                                      cells.add(DataCell(
+                                          SizedBox(
+                                              width: 100,
+                                              child: Text(
+                                                  (vote['total'] as num)
+                                                      .toStringAsFixed(1)))));
                                       return DataRow(cells: cells);
                                     }).toList(),
                                   ),
@@ -369,18 +426,43 @@ class VoteDetailScreen extends StatelessWidget {
                   style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Colors.orange),
+                      color: Colors.deepOrange),
                 ),
                 SizedBox(height: 8),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
                     columns: [
-                      DataColumn(label: Text("Rank", style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text("Contestant", style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text("Total Score", style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text("Votes", style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text("Avg Score", style: TextStyle(fontWeight: FontWeight.bold))),
+                      DataColumn(
+                          label: SizedBox(
+                              width: 100,
+                              child: Text("Rank",
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold)))),
+                      DataColumn(
+                          label: SizedBox(
+                              width: 150,
+                              child: Text("Contestant",
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold)))),
+                      DataColumn(
+                          label: SizedBox(
+                              width: 100,
+                              child: Text("Total Score",
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold)))),
+                      DataColumn(
+                          label: SizedBox(
+                              width: 100,
+                              child: Text("Votes",
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold)))),
+                      DataColumn(
+                          label: SizedBox(
+                              width: 100,
+                              child: Text("Avg Score",
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold)))),
                     ],
                     rows: List.generate(candidates.length, (index) {
                       final candidate = candidates[index];
@@ -394,11 +476,22 @@ class VoteDetailScreen extends StatelessWidget {
                       else
                         rankLabel = "${index + 1}th";
                       return DataRow(cells: [
-                        DataCell(Text(rankLabel)),
-                        DataCell(Text(candidate['contestant'])),
-                        DataCell(Text((candidate['totalScore'] as double).toStringAsFixed(1))),
-                        DataCell(Text(candidate['voteCount'].toString())),
-                        DataCell(Text((candidate['averageScore'] as double).toStringAsFixed(1))),
+                        DataCell(SizedBox(
+                            width: 100, child: Text(rankLabel))),
+                        DataCell(SizedBox(
+                            width: 150,
+                            child: Text(candidate['contestant']))),
+                        DataCell(SizedBox(
+                            width: 100,
+                            child: Text((candidate['totalScore'] as double)
+                                .toStringAsFixed(1)))),
+                        DataCell(SizedBox(
+                            width: 100,
+                            child: Text(candidate['voteCount'].toString()))),
+                        DataCell(SizedBox(
+                            width: 100,
+                            child: Text((candidate['averageScore'] as double)
+                                .toStringAsFixed(1)))),
                       ]);
                     }),
                   ),
@@ -410,7 +503,8 @@ class VoteDetailScreen extends StatelessWidget {
                   children: [
                     ElevatedButton(
                       onPressed: () async {
-                        Uint8List pdfBytes = await _generatePdf(candidates, criteriaMap, eventName);
+                        Uint8List pdfBytes = await _generatePdf(
+                            candidates, criteriaMap, eventName);
                         await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
                       },
                       child: Text("Print"),
@@ -418,8 +512,11 @@ class VoteDetailScreen extends StatelessWidget {
                     SizedBox(width: 16),
                     ElevatedButton(
                       onPressed: () async {
-                        Uint8List pdfBytes = await _generatePdf(candidates, criteriaMap, eventName);
-                        await Printing.sharePdf(bytes: pdfBytes, filename: 'score_results.pdf');
+                        Uint8List pdfBytes = await _generatePdf(
+                            candidates, criteriaMap, eventName);
+                        await Printing.sharePdf(
+                            bytes: pdfBytes,
+                            filename: 'score_results.pdf');
                       },
                       child: Text("Download"),
                     ),

@@ -40,6 +40,8 @@ dependencies:
   firebase_auth: ^5.5.0
   pdf: ^3.9.0
   printing: ^5.9.0
+  cloud_functions: ^5.5.0
+  url_launcher: ^6.3.1
   
 
 dev_dependencies:
