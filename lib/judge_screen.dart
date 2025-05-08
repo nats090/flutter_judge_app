@@ -11,11 +11,14 @@ class _JudgeScreenState extends State<JudgeScreen> {
   String? selectedEventName;
   String? selectedContestant;
   TextEditingController judgeNameController = TextEditingController();
- 
+
+  // List of criteria (each a map with keys "name" and "weight")
   List<Map<String, dynamic>> criteria = [];
+
+  // Stores the current slider values for each criterion (by criterion name)
   Map<String, double> criteriaScores = {};
   bool criteriaLoading = false;
- 
+
   Future<void> fetchCriteria(String eventId) async {
     setState(() {
       criteriaLoading = true;
@@ -27,7 +30,7 @@ class _JudgeScreenState extends State<JudgeScreen> {
           .collection('events')
           .doc(eventId)
           .get();
- 
+
       var criteriaData = eventDoc.get('criteria');
       List<Map<String, dynamic>> fetchedCriteria = [];
       if (criteriaData is List<dynamic>) {
@@ -42,13 +45,13 @@ class _JudgeScreenState extends State<JudgeScreen> {
           }
         }
       }
- 
+
       String eventName = "Unknown Event";
       var eventData = eventDoc.data();
       if (eventData is Map<String, dynamic> && eventData.containsKey('name')) {
         eventName = eventData['name'].toString();
       }
- 
+
       setState(() {
         criteria = fetchedCriteria;
         selectedEventName = eventName;
@@ -64,19 +67,21 @@ class _JudgeScreenState extends State<JudgeScreen> {
       });
     }
   }
- 
+
   void submitVote() async {
     String judgeName = judgeNameController.text.trim();
     if (selectedEvent != null &&
         selectedContestant != null &&
         judgeName.isNotEmpty) {
       try {
+        // Reference to the candidate document in the scoreboard.
         var scoreboardRef = FirebaseFirestore.instance
             .collection('events')
             .doc(selectedEvent)
             .collection('scoreboard')
             .doc(selectedContestant);
- 
+
+        // Check if this judge already submitted a vote for this candidate.
         QuerySnapshot existingVote = await scoreboardRef
             .collection('votes')
             .where('judge', isEqualTo: judgeName)
@@ -87,11 +92,13 @@ class _JudgeScreenState extends State<JudgeScreen> {
           );
           return;
         }
- 
+
+        // Ensure the candidate document exists.
         await scoreboardRef.set({
           'contestant': selectedContestant,
         }, SetOptions(merge: true));
- 
+
+        // Calculate the weighted total score.
         double weightedTotal = 0.0;
         for (var crit in criteria) {
           String critName = crit["name"];
@@ -99,14 +106,15 @@ class _JudgeScreenState extends State<JudgeScreen> {
           double score = criteriaScores[critName] ?? 0;
           weightedTotal += score * (weight / 100);
         }
- 
+
+        // Store the vote.
         await scoreboardRef.collection('votes').add({
           'judge': judgeName,
           'criteria_scores': criteriaScores,
           'total': weightedTotal,
           'timestamp': FieldValue.serverTimestamp(),
         });
- 
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Scores submitted by $judgeName!")),
         );
@@ -126,15 +134,29 @@ class _JudgeScreenState extends State<JudgeScreen> {
       );
     }
   }
+  
+  /// Computes the weighted total based on current slider inputs.
+  double computeWeightedTotal() {
+    double total = 0.0;
+    for (var crit in criteria) {
+      String critName = crit["name"];
+      double weight = crit["weight"];
+      double score = criteriaScores[critName] ?? 0;
+      total += score * (weight / 100);
+    }
+    return total;
+  }
  
   @override
   Widget build(BuildContext context) {
+    double currentWeightedTotal = computeWeightedTotal();
     return Scaffold(
       appBar: AppBar(title: Text("Judge Panel")),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(24),
         child: Column(
           children: [
+            // Judge Name Input.
             TextField(
               controller: judgeNameController,
               decoration: InputDecoration(
@@ -143,6 +165,7 @@ class _JudgeScreenState extends State<JudgeScreen> {
               ),
             ),
             SizedBox(height: 20),
+            // Event Dropdown.
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('events').snapshots(),
               builder: (context, snapshot) {
@@ -179,6 +202,7 @@ class _JudgeScreenState extends State<JudgeScreen> {
               },
             ),
             SizedBox(height: 20),
+            // Contestant Dropdown: merged default list and Firestore data
             if (selectedEvent != null)
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
@@ -219,6 +243,7 @@ class _JudgeScreenState extends State<JudgeScreen> {
                 },
               ),
             SizedBox(height: 20),
+            // Criteria Sliders.
             criteriaLoading
                 ? Text("Loading criteria...", style: TextStyle(color: Colors.blue))
                 : criteria.isNotEmpty
@@ -252,12 +277,27 @@ class _JudgeScreenState extends State<JudgeScreen> {
                       )
                     : Text("No criteria found", style: TextStyle(color: Colors.red)),
             SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: submitVote,
-              child: Text("Submit Scores"),
+            // Row containing the Submit Button and the computed weighted total (average)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                ElevatedButton(
+                  onPressed: submitVote,
+                  child: Text("Submit Scores"),
+                ),
+                // Display the computed weighted total score.
+                Text(
+                  "Total: ${currentWeightedTotal.toStringAsFixed(1)}",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.deepOrange,
+                  ),
+                ),
+              ],
             ),
             SizedBox(height: 20),
-            // Voting Tutorial
+            // Voting Instructions Tutorial.
             ExpansionTile(
               title: Text("Voting Instructions", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange)),
               children: [

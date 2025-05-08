@@ -129,6 +129,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(color: Colors.grey[800]),
                   ),
                   SizedBox(height: 4),
+                  // If you want a hyperlinked text, you can wrap this in an InkWell along with url_launcher.
                   Text(
                     "Facebook: Neil J A Lebrillo",
                     style: TextStyle(color: Colors.grey[800]),
@@ -154,22 +155,33 @@ class _LoginScreenState extends State<LoginScreen> {
       String password = passwordController.text.trim();
       try {
         if (isLogin) {
-          await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+          // Sign out any existing session before logging in.
+          await FirebaseAuth.instance.signOut();
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+              email: email, password: password);
         } else {
           // Sign up.
-          UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
+          UserCredential userCredential = await FirebaseAuth.instance
+              .createUserWithEmailAndPassword(email: email, password: password);
           String uid = userCredential.user!.uid;
           print("User created with uid: $uid");
           await FirebaseFirestore.instance.collection('users').doc(uid).set({
             'email': email,
             'role': role.toLowerCase(),
-            'approved': (role.toLowerCase() == 'admin' || role.toLowerCase() == 'judge') ? "false" : "true",
+            'approved': (role.toLowerCase() == 'admin' || role.toLowerCase() == 'judge')
+                ? "false"
+                : "true",
           });
           print("User document for uid $uid created in Firestore.");
         }
+      } on FirebaseAuthException catch (e) {
+        print("FirebaseAuthException: ${e.code} - ${e.message}");
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message ?? "Authentication Error")));
       } catch (e) {
         print("Error during authentication: $e");
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Error: $e")));
       }
     }
   }
